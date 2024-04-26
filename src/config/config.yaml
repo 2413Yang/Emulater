@@ -1,19 +1,21 @@
 Emulators:
   - name: "Emulator1"
+    mode: HF
     packets_per_second: 20000
     packet_size: 2988
-    mode: normal
-    packet_loss: 0.0
-    source_file: "CMakeCache.txt"
-    ip: "192.168.1.100"
-    port: 8888
+    data_file: "CMakeCache.txt"
+    group_ip: "239.255.0.2"
+    group_port: 8888
+    ticker: 
+      ticker_type: SimpleTicker
 
   - name: "Emulator2"
-    packets_per_second: 15000
-    packet_size: 1500
-    mode: normal
-    packet_loss: 0.1
-    source_file: "CMakeCache.txt"
-    ip: "192.168.1.102"
-    port: 8888
-
+    mode: LF
+    packets_per_second: 5000
+    packet_size: 3204
+    data_file: "CMakeCache_1.txt"
+    group_ip: "239.255.0.3"
+    group_port: 10001
+    ticker: 
+      ticker_type: RandomDelayTicker
+      packet_loss: 0.0

@@ -3,73 +3,80 @@
 #include <iostream>
 #include <cstring>
 #include <fstream>
+#include <yaml-cpp/yaml.h>
+#include <thread>
+#include <csignal>
+#include <vector>
 #include "Factory.h"
 #include "MessageFormatter.h"
+#include "MulticastSender.h"
 
-static std::pair<int, struct sockaddr_in> initializeSocket(const std::string &multicastGroup, int port);
 static bool readFileToBuffer(const std::string &filename, std::vector<uint8_t> &buffer);
+static void cfgHandler(const EmulatorCfg* emu_cfg);
+std::vector<std::shared_ptr<Service>> service_list;
+
+static void sigint_handler(int);
 
 int main(int argc, char *argv[]){
+    signal(SIGINT,sigint_handler);
     if (argc < 2) {
-      std::cerr << "Usage: " << argv[0] << "<config_file_path>" << std::endl;
+      std::cerr << "Usage: " << argv[0] << "<config_file>" << std::endl;
       return EXIT_FAILURE;
     }
     std::string config_file = argv[1];
-    std::shared_ptr<Config> config = createEmulaterCfg(config_file);
+    std::shared_ptr<Config> config = createEmulaterCfg(YAML::LoadFile(config_file));
     std::vector<EmulatorCfg> cfg_list = config->load();
-    for (auto item = cfg_list.begin(); item != cfg_list.end(); item++){
-      std::cout << item->name << std::endl;
-      auto result = initializeSocket(item->ip,item->port);
-      int sockfd = result.first;
-      struct sockaddr_in addr = result.second;
-      std::vector<uint8_t> buffer;
-      if (!readFileToBuffer(item->source_file, buffer)) {
-          return 1;
-      }
-      std::unique_ptr<MessageFormatter> messageFormatter = nullptr;
-      if (item->packet_size == getHFPacketSize()){
-          messageFormatter = createHFMessageFormatter(std::move(buffer));
-      }else if(item->packet_size == getLFPacketSize()){
-          messageFormatter = createLFMessageFormatter(std::move(buffer));
-      }
-      if (messageFormatter == nullptr) {
-          std::cerr << "Body buffer capacity is too low." << std::endl;
-          return 1;
-      }
-      auto curre_time = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
-      auto start_time = curre_time + std::chrono::seconds(1);
-      std::cout << "ticker" << std::endl;
-      auto ticker = createTicker(start_time, item->packets_per_second);
-      std::cout << "service" << std::endl;
-      auto service = createEmulaterService(std::move(ticker),std::move(messageFormatter),sockfd,addr,item->packet_size);
-      service->serve();
-      std::cout << "end" << std::endl;
+    std::vector<std::thread> threadlist(cfg_list.size());
+    int cfg_num = cfg_list.size();
+    for (int i = 0; i < cfg_num; i++){
+      threadlist[i] = std::thread(cfgHandler,&cfg_list[i]);
+    }
+    for (int i = 0; i < cfg_num; i++){
+      threadlist[i].join();
     }
 }
 
-// 初始化socket
-static std::pair<int, struct sockaddr_in> initializeSocket(const std::string &multicastGroup, int port) {
-  // 创建 UDP 套接字
-  int sockfd = -1;
-  struct sockaddr_in addr;
+static void cfgHandler(const EmulatorCfg* emu_cfg){
+      std::string filename = emu_cfg->data_file;
+      std::vector<uint8_t> buffer;
+      if (!readFileToBuffer(filename, buffer)) {
+          std::cout << emu_cfg->name <<"  readFileToBuffer failed." << std::endl;
+          return;
+      }
+      
+      std::unique_ptr<MessageFormatter> messageFormatter = nullptr;
+      if (emu_cfg->mode == "HF" && emu_cfg->packet_size == getHFPacketSize()){
+        messageFormatter = createHFMessageFormatter(std::move(buffer));
+      }else if(emu_cfg->mode == "LF" && emu_cfg->packet_size == getLFPacketSize()){
+        messageFormatter = createLFMessageFormatter(std::move(buffer));
+      }else{
+        std::cerr << "** Emulater Supper ** " << std::endl;
+        std::cerr << "[mode]  [packet_size]" << std::endl;
+        std::cerr << "  HF        2988 B" << std::endl;
+        std::cerr << "  LF        3204 B" << std::endl;
+        return;
+      }
+      if (messageFormatter == nullptr){
+        std::cerr << emu_cfg->name <<"  Create MessageFormatter is failed." << std::endl;
+        return;
+      }
 
-  if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-    std::cerr << "Failed to create socket. " << std::endl;
-    return {-1, addr};
-  }
-  // 设置套接字选项
-  int ttl = 64;
-  if (setsockopt(sockfd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) == -1) {
-    std::cerr << "Failed to set socket options. " << std::endl;
-    return {-1, addr};
-  }
-  // 设置目标地址
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = inet_addr(multicastGroup.c_str());
-  addr.sin_port = htons(port);
+      auto curre_time = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
+      auto start_time = curre_time + std::chrono::seconds(1);
+      std::unique_ptr<Ticker> ticker = nullptr;
+      if (emu_cfg->ticker.ticker_type == "SimpleTicker"){
+        ticker = createTicker(start_time, emu_cfg->packets_per_second);
+      }else if(emu_cfg->ticker.ticker_type == "RandomDelayTicker"){
+        std::shared_ptr<Random> random = createRandom((1+ emu_cfg->ticker.packet_loss)/2);
+        ticker = createPacketLossTicker(random,start_time,emu_cfg->packets_per_second);
+      }else{
+        std::cout << emu_cfg->name << "Ticker Support `SimpleTicker` or `RandomDelayTicker`" << std::endl;
+        return;
+      }
 
-  return {sockfd, addr};
+      auto service = createEmulaterService(std::move(ticker),std::move(messageFormatter),emu_cfg->group_ip,emu_cfg->group_port,emu_cfg->packet_size);
+      service_list.push_back(service);
+      service->start();  
 }
 
 static bool readFileToBuffer(const std::string &filename,std::vector<uint8_t> &buffer) {
@@ -95,4 +102,11 @@ static bool readFileToBuffer(const std::string &filename,std::vector<uint8_t> &b
   // 关闭文件并返回成功
   file.close();
   return true;
+}
+
+void sigint_handler(int){
+  std::cout<< "SIGINT signal is triggered." << std::endl;
+  for(auto& item : service_list){
+    item->stop();
+  }
 }

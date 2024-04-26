@@ -1,17 +1,21 @@
 #ifndef ENTITY_H
 #define ENTITY_H
 #include <string>
-#include <vector>
+
+struct TickerInfo {
+    std::string ticker_type;
+    double packet_loss;
+};
 
 struct EmulatorCfg {
     std::string name;
+    std::string mode;
     int packets_per_second;
     int packet_size;
-    std::string mode;
-    double packet_loss;
-    std::string source_file;
-    std::string ip;
-    int port;
+    std::string data_file;
+    std::string group_ip;
+    int group_port;
+    TickerInfo ticker;
 };
 
 #endif //ENTITY_H

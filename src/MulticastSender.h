@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <utility>
 #include "entity.h"
-
+#include <vector>
 // 定义节奏器接口
 class Ticker {
 public:
@@ -29,14 +29,14 @@ public:
   virtual double quantile() = 0;
 };
 
-class Service {
-public:
-  virtual void serve() = 0;
-  virtual void stop() = 0;
-};
-
 class Config{
 public:
   virtual const std::vector<EmulatorCfg>& load() const = 0;
+};
+
+class Service {
+public:
+  virtual void start() = 0;
+  virtual void stop() = 0;
 };
 #endif // MULTICAST_H

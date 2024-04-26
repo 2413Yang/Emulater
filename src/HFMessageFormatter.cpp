@@ -7,7 +7,6 @@
 #include <ctime>
 #include <vector>
 #include <memory>
-
 #include "Factory.h"
 #include "MessageFormatter.h"
 
